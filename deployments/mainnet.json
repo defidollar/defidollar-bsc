@@ -1,0 +1,38 @@
+{
+    "contracts": {
+        "tokens": {
+            "BUSD": {
+                "address": "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",
+                "decimals": 18
+            },
+            "USDT": {
+                "address": "0x55d398326f99059fF775485246999027B3197955",
+                "decimals": 18
+            },
+            "USDC": {
+                "address": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+                "decimals": 18
+            },
+            "DUSD": {
+                "address": "0x154C28BA3736ee4e5E89E0081a00F04ec67992F0",
+                "decimals": 18
+            },
+            "ibDUSD": {
+                "address": "0x4EaC4c4e9050464067D673102F8E24b2FccEB350",
+                "decimals": 18
+            }
+        },
+        "peaks": {
+            "yVaultPeak": {
+                "coins": [
+                    "BUSD",
+                    "USDT",
+                    "USDC"
+                ],
+                "address": "0x3889Af04B5C761D7B6d5b2679abFd5A4cc9E4F09",
+                "zap": "0x6972Eb9c09db9AC5Ff25ce4102daa08297890738"
+            }
+        },
+        "base": "0xE449Ca7d10b041255E7e989D158Bee355d8f88d3",
+    }
+}
