@@ -4,9 +4,12 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20, SafeMath} from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/math/Math.sol";
 
-import {GovernableProxy} from "./proxy/GovernableProxy.sol";
-import {ICore} from "./interfaces/ICore.sol";
-import {IDUSD} from "./interfaces/IDUSD.sol";
+import {GovernableProxy} from "../proxy/GovernableProxy.sol";
+import {
+    ICore,
+    IDUSD,
+    IPeak
+} from "../interfaces/IDefiDollar.sol";
 
 contract Core is GovernableProxy, ICore {
     using SafeERC20 for IERC20;
@@ -16,12 +19,6 @@ contract Core is GovernableProxy, ICore {
     uint constant FEE_PRECISION = 10000;
 
     IDUSD public immutable dusd;
-
-    uint public redeemFactor;
-
-    constructor(address _dusd) public {
-        dusd = IDUSD(_dusd);
-    }
 
     // Interface contracts for third-party protocol integrations
     enum PeakState { Extinct, Active, Dormant }
@@ -33,11 +30,19 @@ contract Core is GovernableProxy, ICore {
     mapping(address => Peak) public peaks;
     address[] public peaksAddresses;
 
+    mapping(address => bool) public harvesters;
+    address public beneficiary;
+    uint override public redeemFactor;
+
     // END OF STORAGE VARIABLES
 
     event Mint(address indexed account, uint amount);
     event Redeem(address indexed account, uint amount);
     event PeakWhitelisted(address indexed peak);
+
+    constructor(address _dusd) public {
+        dusd = IDUSD(_dusd);
+    }
 
     /**
     * @notice Mint DUSD
@@ -84,8 +89,58 @@ contract Core is GovernableProxy, ICore {
         peak.amount = peak.amount.sub(peak.amount.min(dusdAmount));
         dusd.burn(account, dusdAmount);
         emit Redeem(account, dusdAmount);
-        return dusdAmount;
+        return dusdAmount.mul(redeemFactor).div(FEE_PRECISION);
     }
+
+    function harvest() override external {
+        require(harvesters[msg.sender], "HARVEST_NO_AUTH");
+
+        uint _totalAssets;
+        for (uint i = 0; i < peaksAddresses.length; i++) {
+            Peak memory peak = peaks[peaksAddresses[i]];
+            if (peak.state == PeakState.Extinct) {
+                continue;
+            }
+            _totalAssets = _totalAssets.add(
+                IPeak(peaksAddresses[i]).harvest()
+            );
+        }
+
+        if (beneficiary != address(0)) {
+            uint earned = _earned(_totalAssets);
+            if (earned > 0) {
+                dusd.mint(beneficiary, earned);
+            }
+        }
+    }
+
+    /* ##### View ##### */
+
+    function earned() override public view returns(uint) {
+        return _earned(totalSystemAssets());
+    }
+
+    function _earned(uint _totalAssets) internal view returns(uint) {
+        uint supply = dusd.totalSupply();
+        if (_totalAssets > supply) {
+            return _totalAssets.sub(supply);
+        }
+        return 0;
+    }
+
+    function totalSystemAssets() public view returns (uint _totalAssets) {
+        for (uint i = 0; i < peaksAddresses.length; i++) {
+            Peak memory peak = peaks[peaksAddresses[i]];
+            if (peak.state == PeakState.Extinct) {
+                continue;
+            }
+            _totalAssets = _totalAssets.add(
+                IPeak(peaksAddresses[i]).portfolioValue()
+            );
+        }
+    }
+
+    /* ##### Governance ##### */
 
     /**
     * @notice Whitelist a new peak
@@ -128,5 +183,21 @@ contract Core is GovernableProxy, ICore {
             "Incorrect upper bound for fee"
         );
         redeemFactor = _redeemFactor;
+    }
+
+    function authorizeHarvester(address _harvester, bool _status)
+        external
+        onlyGovernance
+    {
+        require(_harvester != address(0x0), "Zero Address");
+        harvesters[_harvester] = _status;
+    }
+
+    function setHarvestBeneficiary(address _beneficiary)
+        external
+        onlyGovernance
+    {
+        require(_beneficiary != address(0x0), "Zero Address");
+        beneficiary = _beneficiary;
     }
 }

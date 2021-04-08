@@ -3,11 +3,14 @@ pragma solidity 0.6.10;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20, SafeMath} from "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
-import {ICore} from "../interfaces/ICore.sol";
+import {ICore,INervePeak} from "../interfaces/IDefiDollar.sol";
+import {IMasterMind,INerve} from "../interfaces/Nerve.sol";
 
-contract NervePeak {
+contract NervePeak is INervePeak {
     using SafeERC20 for IERC20;
     using SafeMath for uint;
+
+    uint constant FEE_PRECISION = 10000;
 
     ICore public immutable core;
 
@@ -15,13 +18,20 @@ contract NervePeak {
     IERC20 public immutable nrvLP;
     IMasterMind public immutable masterMind;
 
+    Uni public immutable uni;
+    IERC20 public immutable nrv;
+    IERC20 public immutable busd;
+
     uint constant public PID = 0;
 
     constructor(
         address _core,
         address _nerve,
         address _nrvLP,
-        address _masterMind
+        address _masterMind,
+        address _nrv,
+        address _busd,
+        address _uni
     )
         public
     {
@@ -29,35 +39,84 @@ contract NervePeak {
         nerve = INerve(_nerve);
         nrvLP = IERC20(_nrvLP);
         masterMind = IMasterMind(_masterMind);
+        nrv = IERC20(_nrv);
+        busd = IERC20(_busd);
+        uni = Uni(_uni);
+        IERC20(_nrvLP).safeApprove(_masterMind, uint(-1));
     }
 
-    function mint(uint amount) external returns (uint dusd) {
-        nrvLP.safeTransferFrom(msg.sender, address(this), amount);
-        dusd = amount.mul(nerve.getVirtualPrice()).div(1e18);
+    function mint(uint nrvLPAmount) override external returns (uint dusd) {
+        nrvLP.safeTransferFrom(msg.sender, address(this), nrvLPAmount);
+        dusd = calcMint(nrvLPAmount);
         core.mint(dusd, msg.sender);
-        nrvLP.safeApprove(address(masterMind), amount);
-        masterMind.deposit(PID, amount);
+        masterMind.deposit(PID, nrvLPAmount);
     }
 
-    function redeem(uint dusd) external returns (uint nrvLPAmount) {
-        core.redeem(dusd, msg.sender);
-        nrvLPAmount = dusd.mul(1e18).div(nerve.getVirtualPrice());
+    function redeem(uint dusd) override external returns (uint nrvLPAmount) {
+        uint usd = core.redeem(dusd, msg.sender);
+        nrvLPAmount = usd.mul(1e18).div(nerve.getVirtualPrice());
         masterMind.withdraw(PID, nrvLPAmount);
         nrvLP.safeTransfer(msg.sender, nrvLPAmount);
     }
+
+    function harvest() override external returns(uint) {
+        require(msg.sender == address(core), "HARVEST_NO_AUTH");
+
+        // Claim all NRV
+        masterMind.withdraw(PID, 0);
+
+        // Swap NRV for BUSD
+        address[] memory path = new address[](2);
+        path[0] = address(nrv);
+        path[1] = address(busd);
+        uint _nrv = nrv.balanceOf(address(this));
+        nrv.safeApprove(address(uni), _nrv);
+        uint[] memory amounts = Uni(uni).swapExactTokensForTokens(
+            nrv.balanceOf(address(this)),
+            0,
+            path,
+            address(this),
+            now
+        );
+
+        // addLiquidity to Nerve
+        uint _busd = amounts[1];
+        uint[] memory liquidity = new uint[](3);
+        liquidity[0] = _busd;
+        busd.safeApprove(address(nerve), _busd);
+        nerve.addLiquidity(liquidity, 0, now);
+
+        // Stake
+        masterMind.deposit(PID, nrvLP.balanceOf(address(this)));
+
+        return portfolioValue();
+    }
+
+    function calcMint(uint nrvLPAmount) override public view returns(uint) {
+        return nrvLPAmount.mul(nerve.getVirtualPrice()).div(1e18);
+    }
+
+    function calcRedeem(uint dusd) override public view returns(uint) {
+        return dusd
+            .mul(core.redeemFactor())
+            .div(FEE_PRECISION)
+            .mul(1e18)
+            .div(nerve.getVirtualPrice());
+    }
+
+    function portfolioValue() override public view returns(uint) {
+        (uint amount,) = masterMind.userInfo(PID, address(this));
+        return amount.mul(nerve.getVirtualPrice()).div(1e18);
+    }
 }
 
-interface INerve {
-    function addLiquidity(
-        uint256[] calldata amounts,
-        uint256 minToMint,
-        uint256 deadline
-    ) external returns (uint256);
-
-    function getVirtualPrice() external returns (uint256);
-}
-
-interface IMasterMind {
-    function deposit(uint, uint) external;
-    function withdraw(uint, uint) external;
+interface Uni {
+    function getAmountsOut(uint amountIn, address[] calldata path) external view returns (uint[] memory amounts);
+    function swapExactTokensForTokens(
+        uint amountIn,
+        uint amountOutMin,
+        address[] calldata path,
+        address to,
+        uint deadline
+    ) external returns (uint[] memory amounts);
 }

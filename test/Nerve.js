@@ -1,41 +1,20 @@
-const _1e18 = ethers.constants.WeiPerEther
+const { expect } = require("chai")
 
-const blockNumber = 6216992
-const nrvLPWhale = '0xfe00888ff72e11b00437a13ff96965b44cbf7d47'
+const {
+    constants: { _1e18, ZERO },
+    impersonateAccount,
+    setupMainnetContracts,
+} = require('./utils')
+
+const nrvLPWhale = '0x3168082c31dc4b03ac752fb43d1c3bf8ae6ee9ae'
 
 describe('Nerve', function() {
     before('setup contracts', async function() {
-        await network.provider.request({
-            method: "hardhat_reset",
-            params: [{
-                forking: {
-                    jsonRpcUrl: `https://bsc-dataseed.binance.org/`,
-                }
-            }]
-        })
         signers = await ethers.getSigners()
         alice = signers[0].address
-
-        ;([ nerve, nrvLP, masterMind ] = await Promise.all([
-            ethers.getContractAt('INerve', '0x1B3771a66ee31180906972580adE9b81AFc5fCDc'),
-            ethers.getContractAt('IERC20', '0xf2511b5e4fb0e5e2d123004b672ba14850478c14'),
-            ethers.getContractAt('IMasterMind', '0x2EBe8CDbCB5fB8564bC45999DAb8DA264E31f24E')
-        ]))
-
-        const [ Core, NervePeak, UpgradableProxy, DUSD ] = await Promise.all([
-            ethers.getContractFactory('Core'),
-            ethers.getContractFactory('NervePeak'),
-            ethers.getContractFactory('UpgradableProxy'),
-            ethers.getContractFactory('DUSD'),
-        ])
-        core = await UpgradableProxy.deploy()
-        dusd = await DUSD.deploy(core.address)
-        nervePeak = await NervePeak.deploy(core.address, nerve.address, nrvLP.address, masterMind.address)
-        await core.updateImplementation(
-            (await Core.deploy(dusd.address)).address
-        )
-        core = await ethers.getContractAt('Core', core.address)
-        await core.whitelistPeak(nervePeak.address, _1e18.mul(100))
+        bob = signers[1].address
+        ;({ core, zap, dusd, ibdusd, nervePeak, redeemFactor, underlyingCoins } = await setupMainnetContracts());
+        ;([ busd, tether] =  underlyingCoins)
     })
 
     it('mint', async function() {
@@ -45,17 +24,36 @@ describe('Nerve', function() {
 
         await nrvLP.approve(nervePeak.address, amount)
         await nervePeak.mint(amount)
+
+        expect(
+            await dusd.balanceOf(alice)
+        ).to.eq(
+            amount.mul(await nerve.getVirtualPrice()).div(_1e18)
+        )
+        expect(await nrvLP.balanceOf(alice)).to.eq(ZERO)
+        expect(await nrvLP.balanceOf(nervePeak.address)).to.eq(ZERO) // staked
+        expect(
+            (await masterMind.userInfo(0, nervePeak.address)).amount
+        ).to.eq(amount)
     })
 
     it('redeem', async function() {
         const amount = await dusd.balanceOf(alice)
+
         await nervePeak.redeem(amount)
+
+        const nrvLPAmount = amount.mul(redeemFactor).div(1e4).mul(_1e18).div(await nerve.getVirtualPrice())
+        expect(await nrvLP.balanceOf(alice)).to.eq(nrvLPAmount)
+        expect(await dusd.balanceOf(alice)).to.eq(ZERO)
+    })
+
+    it('harvest', async function() {
+        await core.authorizeHarvester(bob, true)
+        await core.setHarvestBeneficiary(bob)
+        await core.connect(ethers.provider.getSigner(bob)).harvest()
+        // console.log((await masterMind.pendingNerve(0, nervePeak.address)).toString())
+        // const bal = await nrvLP.balanceOf(nervePeak.address)
+        // console.log((await nrvLP.balanceOf(nervePeak.address)).toString())
+        // expect((await nrvLP.balanceOf(nervePeak.address)).gt(bal)).to.be.true
     })
 })
-
-async function impersonateAccount(account) {
-    await network.provider.request({
-        method: 'hardhat_impersonateAccount',
-        params: [account],
-    })
-}
