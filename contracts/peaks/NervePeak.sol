@@ -5,8 +5,9 @@ import {SafeERC20, SafeMath} from "@openzeppelin/contracts/token/ERC20/SafeERC20
 
 import {ICore,INervePeak} from "../interfaces/IDefiDollar.sol";
 import {IMasterMind,INerve} from "../interfaces/Nerve.sol";
+import {GovernableProxy} from "../proxy/GovernableProxy.sol";
 
-contract NervePeak is INervePeak {
+contract NervePeak is GovernableProxy, INervePeak {
     using SafeERC20 for IERC20;
     using SafeMath for uint;
 
@@ -42,13 +43,13 @@ contract NervePeak is INervePeak {
         nrv = IERC20(_nrv);
         busd = IERC20(_busd);
         uni = Uni(_uni);
-        IERC20(_nrvLP).safeApprove(_masterMind, uint(-1));
     }
 
     function mint(uint nrvLPAmount) override external returns (uint dusd) {
         nrvLP.safeTransferFrom(msg.sender, address(this), nrvLPAmount);
         dusd = calcMint(nrvLPAmount);
         core.mint(dusd, msg.sender);
+        nrvLP.safeApprove(address(masterMind), nrvLPAmount);
         masterMind.deposit(PID, nrvLPAmount);
     }
 
@@ -66,29 +67,34 @@ contract NervePeak is INervePeak {
         masterMind.withdraw(PID, 0);
 
         // Swap NRV for BUSD
-        address[] memory path = new address[](2);
-        path[0] = address(nrv);
-        path[1] = address(busd);
         uint _nrv = nrv.balanceOf(address(this));
-        nrv.safeApprove(address(uni), _nrv);
-        uint[] memory amounts = Uni(uni).swapExactTokensForTokens(
-            nrv.balanceOf(address(this)),
-            0,
-            path,
-            address(this),
-            now
-        );
+        if (_nrv > 0) {
+            address[] memory path = new address[](2);
+            path[0] = address(nrv);
+            path[1] = address(busd);
+            nrv.safeApprove(address(uni), _nrv);
+            uint[] memory amounts = Uni(uni).swapExactTokensForTokens(
+                nrv.balanceOf(address(this)),
+                0,
+                path,
+                address(this),
+                now
+            );
 
-        // addLiquidity to Nerve
-        uint _busd = amounts[1];
-        uint[] memory liquidity = new uint[](3);
-        liquidity[0] = _busd;
-        busd.safeApprove(address(nerve), _busd);
-        nerve.addLiquidity(liquidity, 0, now);
+            // addLiquidity to Nerve
+            uint _busd = amounts[1];
+            uint[] memory liquidity = new uint[](3);
+            liquidity[0] = _busd;
+            busd.safeApprove(address(nerve), _busd);
+            nerve.addLiquidity(liquidity, 0, now);
 
-        // Stake
-        masterMind.deposit(PID, nrvLP.balanceOf(address(this)));
-
+            // Stake
+            uint nrvLPAmount = nrvLP.balanceOf(address(this));
+            if (nrvLPAmount > 0) {
+                nrvLP.safeApprove(address(masterMind), nrvLPAmount);
+                masterMind.deposit(PID, nrvLPAmount);
+            }
+        }
         return portfolioValue();
     }
 

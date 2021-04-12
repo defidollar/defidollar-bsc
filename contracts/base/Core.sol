@@ -96,14 +96,18 @@ contract Core is GovernableProxy, ICore {
         require(harvesters[msg.sender], "HARVEST_NO_AUTH");
 
         uint _totalAssets;
-        for (uint i = 0; i < peaksAddresses.length; i++) {
-            Peak memory peak = peaks[peaksAddresses[i]];
-            if (peak.state == PeakState.Extinct) {
-                continue;
+        address[] memory _peaksAddresses = peaksAddresses;
+        for (uint i = 0; i < _peaksAddresses.length; i++) {
+            Peak memory peak = peaks[_peaksAddresses[i]];
+            if (peak.state == PeakState.Active) {
+                _totalAssets = _totalAssets.add(
+                    IPeak(_peaksAddresses[i]).harvest()
+                );
+            } else if (peak.state == PeakState.Dormant) {
+                _totalAssets = _totalAssets.add(
+                    IPeak(_peaksAddresses[i]).portfolioValue()
+                );
             }
-            _totalAssets = _totalAssets.add(
-                IPeak(peaksAddresses[i]).harvest()
-            );
         }
 
         if (beneficiary != address(0)) {
@@ -162,14 +166,12 @@ contract Core is GovernableProxy, ICore {
     /**
     * @notice Change a peaks status
     */
-    function setPeakStatus(address peak, uint ceiling, PeakState state)
+    function setPeakStatus(uint index, uint ceiling, PeakState state)
         external
         onlyGovernance
     {
-        require(
-            peaks[peak].state != PeakState.Extinct,
-            "Peak is extinct"
-        );
+        address peak = peaksAddresses[index];
+        require(peak != address(0), "Invalid Index");
         peaks[peak].ceiling = ceiling;
         peaks[peak].state = state;
     }

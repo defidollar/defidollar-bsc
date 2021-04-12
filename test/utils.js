@@ -56,15 +56,19 @@ async function setupMainnetContracts() {
     ibdusd = await ethers.getContractAt('ibDUSD', ibdusd.address)
     await ibdusd.setFee(redeemFactor)
 
-    nervePeak = await NervePeak.deploy(
-        core.address,
-        nerve.address,
-        nrvLP.address,
-        masterMind.address,
-        nrv.address,
-        '0xe9e7cea3dedca5984780bafc599bd69add087d56', // BUSD
-        '0x05fF2B0DB69458A0750badebc4f9e13aDd608C7F' // pancake swap
+    nervePeak = await UpgradableProxy.deploy()
+    await nervePeak.updateImplementation(
+        (await NervePeak.deploy(
+            core.address,
+            nerve.address,
+            nrvLP.address,
+            masterMind.address,
+            nrv.address,
+            '0xe9e7cea3dedca5984780bafc599bd69add087d56', // BUSD
+            '0x05fF2B0DB69458A0750badebc4f9e13aDd608C7F' // pancake swap
+        )).address
     )
+    nervePeak = await ethers.getContractAt('NervePeak', nervePeak.address)
     await core.whitelistPeak(nervePeak.address, constants._1e18.mul(100))
 
     // [ BUSD, USDT, USDC ]

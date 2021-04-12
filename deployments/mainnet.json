@@ -23,16 +23,16 @@
             }
         },
         "peaks": {
-            "yVaultPeak": {
+            "NervePeak": {
                 "coins": [
                     "BUSD",
                     "USDT",
                     "USDC"
                 ],
-                "address": "0x3889Af04B5C761D7B6d5b2679abFd5A4cc9E4F09",
-                "zap": "0x6972Eb9c09db9AC5Ff25ce4102daa08297890738"
+                "address": "0x4B35E2C06faD543C44bDbAFB80A3e748E316A6CC",
+                "zap": "0x90c52436C9e52DC3E33082a32c0F19225a9F38AB"
             }
         },
-        "base": "0xE449Ca7d10b041255E7e989D158Bee355d8f88d3",
+        "base": "0xb6Dc09f820682B9318AE8900626136C6FfD9FdB6"
     }
 }
